@@ -18,44 +18,58 @@
 ---
 
 # Setup & Installation
-สำหรับการรันใน Local หรือบนเซิร์ฟเวอร์ โปรดตรวจสอบว่าสภาพแวดล้อมมีส่วนประกอบดังนี้:
+สำหรับการรันบน Local หรือบนเซิร์ฟเวอร์ โปรดทำตามขั้นตอนต่อไปนี้เพื่อสร้าง Environment และติดตั้ง Dependencies อย่างถูกต้อง:
 
-1. ติดตั้ง Airflow 3.2.2
+1. **สร้างและเปิดใช้งาน Virtual Environment (venv)** เพื่อป้องกัน Dependency Conflict
    ```bash
-   pip install apache-airflow==3.2.2
+   # สร้าง venv ชื่อ 'airflow_env'
+   python -m venv airflow_env
+
+   # เปิดใช้งาน venv สำหรับ Linux/macOS
+   source airflow_env/bin/activate
+
+   # หรือเปิดใช้งาน venv สำหรับ Windows
+   airflow_env\Scripts\activate
    ```
 
-2. ติดตั้ง Providers ที่ต้องใช้
+2. **ติดตั้ง Packages ทั้งหมดจาก `requirements.txt`**
    ```bash
-   pip install apache-airflow-providers-standard
-   pip install apache-airflow-providers-postgres
+   pip install --upgrade pip
+   pip install -r requirements.txt
    ```
 
-3. ติดตั้ง Library พื้นฐานของโปรเจกต์
-   ```bash
-   pip install requests pendulum pytz
-   ```
-
-4. ตั้งค่า Connection ใน Airflow
+3. **ตั้งค่า Connection และ Variables ใน Airflow**
    - ในหน้า Airflow UI ไปที่ `Admin` -> `Connections`
    - เพิ่ม Connection `farmai_conn` เป็นประเภท PostgreSQL และระบุรายละเอียดฐานข้อมูลเป้าหมายที่ต้องการให้บันทึก
    - ในหน้า Airflow UI ไปที่ `Admin` -> `Variables`
-   - เพิ่ม Variable คีย์ `disaster_api_token` และใส่ค่า Token สำหรับเชื่อมต่อ API
+   - เพิ่ม Variable คีย์ `disaster_api_token` และใส่ค่า Token สำหรับเชื่อมต่อ API (แทนที่การใส่ไว้ในโค้ดโดยตรงเพื่อความปลอดภัย)
 
 ---
 
-# วิธีการรันและการทดสอบระบบเบื้องต้น
-1. คัดลอกไฟล์ `jules_fool.py` ไปใส่ที่โฟลเดอร์ DAGs (โดยทั่วไปคือ `~/airflow/dags`)
-2. ทดสอบว่า DAG โหลดได้สำเร็จโดยรันคำสั่งเช็คโครงสร้างไฟล์ผ่าน Terminal
+# วิธีการรันและการทดสอบระบบเบื้องต้น (DAGs Testing)
+การทดสอบจะช่วยให้มั่นใจได้ว่าโค้ดได้รับการ Refactor อย่างถูกต้องในสภาพแวดล้อม Airflow 3.2.2
+
+1. **ตรวจสอบ Syntax Error (DAG Parsing)**
+   คัดลอกไฟล์ `jules_fool.py` ไปที่โฟลเดอร์ DAGs ของคุณ (ค่าเริ่มต้นคือ `~/airflow/dags`)
+   จากนั้นรันคำสั่งด้านล่างใน Terminal เพื่อเช็คว่า Airflow อ่านไฟล์และตีความสำเร็จโดยไม่มี Error
    ```bash
-   # หากไม่มี Output ที่แสดง Error ถือว่าโหลดสำเร็จ
-   python -c "from airflow.models import DagBag; bag = DagBag(); print(bag.import_errors)"
+   python -c "from airflow.models import DagBag; bag = DagBag(dag_folder='jules_fool.py', include_examples=False); print(bag.import_errors)"
+   # หากไม่มี Error จะแสดงผลลัพธ์ว่า {}
    ```
-3. รันเพื่อทดสอบ Task ทีละอันใน Local
+
+2. **ทดสอบรัน Task แบบ Standalone**
+   สามารถทดสอบรัน Task ย่อยทีละตัวโดยไม่ต้องรันทั้ง Pipeline (เช่น ทดสอบ `call_disaster_api`)
    ```bash
    airflow tasks test Flood_1day call_disaster_api 2024-01-01
    ```
-4. เปิด Airflow UI
-   - หา DAG ชื่อ `Flood_1day` และเปิด Switch (Unpause DAG)
-   - กดปุ่ม `Trigger DAG` มุมขวาบนเพื่อสั่งให้ทำงานทันที
-   - เข้าไปที่ `Graph` หรือ `Grid` เพื่อสังเกตการณ์ทำงานของแต่ละ Task
+
+3. **ทดสอบรันทั้ง DAGs ผ่าน Command Line**
+   สามารถรัน Pipeline ตั้งแต่ต้นจนจบในโหมดทดสอบ
+   ```bash
+   airflow dags test Flood_1day 2024-01-01
+   ```
+
+4. **การรันในโหมด Production ผ่าน Airflow UI**
+   - เปิด Airflow UI หา DAG ชื่อ `Flood_1day` และเปิด Switch (Unpause DAG)
+   - กดปุ่ม `Trigger DAG` (Play button) สั่งให้ทำงานทันที
+   - เข้าไปที่ Tab `Graph` หรือ `Grid` เพื่อสังเกตการณ์ทำงานของแต่ละ Task
