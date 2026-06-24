@@ -1,14 +1,12 @@
 from airflow import DAG
-from airflow.operators.python_operator import PythonOperator
-from datetime import datetime, timedelta
-from airflow.operators.dummy_operator import DummyOperator
+from airflow.providers.standard.operators.python import PythonOperator
+from datetime import datetime
+from airflow.providers.standard.operators.empty import EmptyOperator
 import pendulum 
 import requests
-import json
-import math
-from airflow.exceptions import AirflowFailException, AirflowSkipException
-from airflow.operators.trigger_dagrun import TriggerDagRunOperator
-from airflow.hooks.postgres_hook import PostgresHook
+from airflow.sdk.exceptions import AirflowSkipException
+from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 import pytz
 
 # disaster access token
@@ -19,8 +17,7 @@ flood_caption = "1Day"
 # remake caption
 remake = "test"
 
-catalog_processing_id = f"62fc5865a2bfab7342ab7f35"
-token = f"WNmJ1S4GoZyp5euW2lUKLaBszKGhrgzQzJzgo5QYxuiMQc2JX3bnm1QTcOo7cwRT"
+catalog_processing_id = "62fc5865a2bfab7342ab7f35"
 limit = 1000
 offset = 0
 
@@ -57,7 +54,7 @@ def process_request(path):
         content = get_content(path) 
         if type(content) is not None:
             complate = True
-            if complate == True:  
+            if complate:
                 return content
             start += 1 
 
@@ -120,6 +117,8 @@ def get_check(sql):
     
 # call function task
 def call_disaster_api(**kwargs):
+    from airflow.models import Variable
+    token = Variable.get("disaster_api_token")
     limit_list = limit
     offset_list = offset
     url = f"https://disaster-vallaris.gistda.or.th/core/api/features/1.0/collections/{catalog_processing_id}/items?api_key={token}&limit={limit_list}&offset={offset_list}"
@@ -144,16 +143,16 @@ def call_disaster_api(**kwargs):
         else:
             raise AirflowSkipException
         
-def error_call_api(**kwargs):
-    ti = kwargs['ti']
+def error_call_api(ti, **kwargs):
+
     res = ti.xcom_pull(task_ids='call_disaster_api')
     #print(f"error_read_file: {type(res)}")
     if type(res) is dict:
         raise AirflowSkipException
 
         
-def check_data_list(**kwargs): 
-    ti = kwargs['ti']
+def check_data_list(ti, **kwargs):
+
     data_list = ti.xcom_pull(task_ids='call_disaster_api')
     #print(f"check_data_list: {data_list}") 
     
@@ -161,8 +160,8 @@ def check_data_list(**kwargs):
         raise AirflowSkipException
         
 
-def inset_data_list(**kwargs):
-    ti = kwargs['ti']
+def inset_data_list(ti, **kwargs):
+
     data_list = ti.xcom_pull(task_ids='call_disaster_api')
     print(f"save_data: {data_list}") 
     
@@ -251,8 +250,8 @@ def inset_data_list(**kwargs):
         return None
     
 
-def save_value_fail(**kwargs):
-    ti = kwargs['ti']
+def save_value_fail(ti, **kwargs):
+
     list = ti.xcom_pull(task_ids='inset_data_list')
     
     if list is not None:
@@ -265,75 +264,63 @@ default_args = {
     'retries': 1
 }
 
-dag = DAG(
+with DAG(
     "Flood_1day",
-    schedule_interval = '@daily', 
-    #schedule= '0 2 * * *',
+    schedule='@daily',
     catchup=False,
-    start_date = pendulum.datetime(2024, 1, 1, tz="Asia/Bangkok"),
-    tags=["Floods"]
-)
+    start_date=pendulum.datetime(2024, 1, 1, tz="Asia/Bangkok"),
+    tags=["Floods"],
+    default_args=default_args
+) as dag:
 
-start = DummyOperator(
-    task_id='start', 
-    trigger_rule="one_success",
-    dag=dag
-)
+    start = EmptyOperator(
+        task_id='start',
+        trigger_rule="one_success",
+    )
 
-call_disaster_api = PythonOperator(
-    task_id='call_disaster_api',
-    python_callable=call_disaster_api,
-    provide_context=True, 
-) 
+    call_disaster_api = PythonOperator(
+        task_id='call_disaster_api',
+        python_callable=call_disaster_api,
+    )
 
-error_call_api = PythonOperator(
-    task_id='error_call_api',
-    python_callable=error_call_api,
-    provide_context=True
-) 
+    error_call_api = PythonOperator(
+        task_id='error_call_api',
+        python_callable=error_call_api,
+    )
 
-trigger_error_call_api = TriggerDagRunOperator( # Operator ที่ใช่ในการ trigger pipeline อื่น
-    task_id="trigger_error_call_api",
-    trigger_dag_id=dag_id_to_trigger, # ID ของ DAG เป้าหมายที่ต้องการจะ Trigger
-    conf={"message": f"Error: Call Api Disaster Flood {flood_caption}."}, # เราสามารถส่ง paramter ข้าม pipeline ไปรันใน pipeline ที่ถูก trigger
-)
+    trigger_error_call_api = TriggerDagRunOperator(
+        task_id="trigger_error_call_api",
+        trigger_dag_id=dag_id_to_trigger,
+        conf={"message": f"Error: Call Api Disaster Flood {flood_caption}."},
+    )
 
-check_data_list = PythonOperator(
-    task_id='check_data_list',
-    python_callable=check_data_list,
-    provide_context=True 
-)
+    check_data_list = PythonOperator(
+        task_id='check_data_list',
+        python_callable=check_data_list,
+    )
 
-inset_data_list = PythonOperator(
-    task_id='inset_data_list',
-    python_callable=inset_data_list,
-    provide_context=True 
-)
+    inset_data_list = PythonOperator(
+        task_id='inset_data_list',
+        python_callable=inset_data_list,
+    )
 
-save_value_fail = PythonOperator(
-    task_id='save_value_fail',
-    python_callable=save_value_fail,
-    provide_context=True
-)
+    save_value_fail = PythonOperator(
+        task_id='save_value_fail',
+        python_callable=save_value_fail,
+    )
 
-trigger_error_save = TriggerDagRunOperator( # Operator ที่ใช่ในการ trigger pipeline อื่น
-    task_id="trigger_error_save",
-    trigger_dag_id=dag_id_to_trigger, # ID ของ DAG เป้าหมายที่ต้องการจะ Trigger
-    conf={"message": f"Error: Save Disaster Flood {flood_caption}."}, # เราสามารถส่ง paramter ข้าม pipeline ไปรันใน pipeline ที่ถูก trigger
-)
+    trigger_error_save = TriggerDagRunOperator(
+        task_id="trigger_error_save",
+        trigger_dag_id=dag_id_to_trigger,
+        conf={"message": f"Error: Save Disaster Flood {flood_caption}."},
+    )
 
+    end = EmptyOperator(
+        task_id='end',
+        trigger_rule="one_success",
+    )
 
-end = DummyOperator(
-    task_id='end', 
-    trigger_rule="one_success",
-    #dag=dag
-)
-
-
-start >> call_disaster_api 
-
-call_disaster_api >> check_data_list >> inset_data_list >> end
-
-inset_data_list >> save_value_fail >> trigger_error_save >> end
-
-call_disaster_api >> error_call_api >> trigger_error_call_api >> end
+    start >> call_disaster_api
+    call_disaster_api >> check_data_list >> inset_data_list >> end
+    inset_data_list >> save_value_fail >> trigger_error_save >> end
+    call_disaster_api >> error_call_api >> trigger_error_call_api >> end

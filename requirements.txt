@@ -1,0 +1,6 @@
+apache-airflow==3.2.2
+apache-airflow-providers-standard
+apache-airflow-providers-postgres
+requests
+pendulum
+pytz
